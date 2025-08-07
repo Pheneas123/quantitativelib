@@ -175,3 +175,104 @@ def bs_binary_put_theta(S, K, T, r, sigma, q=0.0):
     return -np.exp(-r * T) * (
         r * stats.norm.cdf(-d2) + stats.norm.pdf(d2) * ((r - q - 0.5 * sigma**2) / (sigma * np.sqrt(T)) + d2 / (2 * T))
     )
+
+# === Stochastic Functions ===
+# General-purpose numerical SDE solvers
+
+def euler_maruyama(mu, sigma, X0, T, N, dW=None):
+    dt = T / N
+    t = np.linspace(0, T, N + 1)
+    X = np.zeros(N + 1)
+    X[0] = X0
+    if dW is None:
+        dW = np.random.normal(0, np.sqrt(dt), size=N)
+    for i in range(N):
+        X[i + 1] = X[i] + mu(t[i], X[i]) * dt + sigma(t[i], X[i]) * dW[i]
+    return t, X
+
+def milstein(mu, sigma, sigma_dx, X0, T, N, dW=None):
+    dt = T / N
+    t = np.linspace(0, T, N + 1)
+    X = np.zeros(N + 1)
+    X[0] = X0
+    if dW is None:
+        dW = np.random.normal(0, np.sqrt(dt), size=N)
+    for i in range(N):
+        X[i + 1] = (
+            X[i]
+            + mu(t[i], X[i]) * dt
+            + sigma(t[i], X[i]) * dW[i]
+            + 0.5 * sigma(t[i], X[i]) * sigma_dx(t[i], X[i]) * (dW[i]**2 - dt)
+        )
+    return t, X
+
+# Model-specific simulators using the above schemes 
+
+def simulate_gbm(S0, mu, sigma, T, N, method="euler"):
+    def drift(t, S): return mu * S
+    def diffusion(t, S): return sigma * S
+    def diffusion_dx(t, S): return sigma
+
+    if method == "euler":
+        return euler_maruyama(drift, diffusion, S0, T, N)
+    elif method == "milstein":
+        return milstein(drift, diffusion, diffusion_dx, S0, T, N)
+    else:
+        raise ValueError("Unknown method: use 'euler' or 'milstein'")
+
+def simulate_cir(X0, kappa, theta, sigma, T, N, method="euler"):
+    def drift(t, X): return kappa * (theta - X)
+    def diffusion(t, X): return sigma * np.sqrt(max(X, 0))
+    def diffusion_dx(t, X): return 0.5 * sigma / np.sqrt(max(X, 1e-8))
+
+    if method == "euler":
+        return euler_maruyama(drift, diffusion, X0, T, N)
+    elif method == "milstein":
+        return milstein(drift, diffusion, diffusion_dx, X0, T, N)
+    else:
+        raise ValueError("Unknown method: use 'euler' or 'milstein'")
+
+def simulate_ou(X0, mu, theta, sigma, T, N, method="euler"):
+    def drift(t, X): return mu * (theta - X)
+    def diffusion(t, X): return sigma
+    def diffusion_dx(t, X): return 0.0
+
+    if method == "euler":
+        return euler_maruyama(drift, diffusion, X0, T, N)
+    elif method == "milstein":
+        return milstein(drift, diffusion, diffusion_dx, X0, T, N)
+    else:
+        raise ValueError("Unknown method: use 'euler' or 'milstein'")
+
+def simulate_heston(S0, V0, mu, kappa, theta, xi, rho, T, N):
+    dt = T / N
+    t = np.linspace(0, T, N + 1)
+    S = np.zeros(N + 1)
+    V = np.zeros(N + 1)
+    S[0], V[0] = S0, V0
+
+    for i in range(N):
+        Z1 = np.random.normal()
+        Z2 = np.random.normal()
+        dW_v = np.sqrt(dt) * Z1
+        dW_s = np.sqrt(dt) * (rho * Z1 + np.sqrt(1 - rho**2) * Z2)
+
+        V[i + 1] = V[i] + kappa * (theta - V[i]) * dt + xi * np.sqrt(max(V[i], 0)) * dW_v
+        S[i + 1] = S[i] + mu * S[i] * dt + np.sqrt(max(V[i], 0)) * S[i] * dW_s
+
+    return t, S, V
+
+def simulate_merton_jump(S0, mu, sigma, lambd, m, v, T, N):
+    dt = T / N
+    t = np.linspace(0, T, N + 1)
+    S = np.zeros(N + 1)
+    S[0] = S0
+
+    for i in range(N):
+        dW = np.random.normal(0, np.sqrt(dt))
+        J = np.random.poisson(lambd * dt)
+        jump = np.sum(np.random.normal(m, np.sqrt(v), J)) if J > 0 else 0
+        S[i + 1] = S[i] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * dW + jump)
+
+    return t, S
+
