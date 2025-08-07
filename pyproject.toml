@@ -1,0 +1,21 @@
+[project]
+name = "quantitativelib"
+version = "0.1.2"
+description = "A stock analysis tool for quants"
+authors = [
+    { name="Pheneas Newman", email="pheneasn@gmail.com" }
+]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "yfinance",
+    "pandas",
+    "matplotlib"
+    "scipy"
+    "tqdm"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
