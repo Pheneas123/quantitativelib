@@ -3,7 +3,7 @@ name = "quantitativelib"
 version = "0.1.2"
 description = "A stock analysis tool for quants"
 authors = [
-    { name="Pheneas Newman", email="pheneasn@gmail.com" }
+    { name="Pheneas Newman" }
 ]
 license = { text = "MIT" }
 readme = "README.md"
