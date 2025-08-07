@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from quantitativelib import base as qt
-from quantitativelib.utils import validate_inputs
+from quantitativelib._utils import validate_inputs
 
 def black_scholes(option_type, K, S, r, T, sigma, q=0.0, precision=4, show_table=False):
     """
