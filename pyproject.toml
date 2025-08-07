@@ -12,8 +12,6 @@ dependencies = [
     "yfinance",
     "pandas",
     "matplotlib"
-    "scipy"
-    "tqdm"
 ]
 
 [build-system]
