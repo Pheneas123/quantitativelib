@@ -19,3 +19,24 @@ analyse_volatility(
     },
     seed=1
 )
+
+#test 2
+
+analyse_volatility(
+    ticker="GOOGL",
+    start_date="2018-01-01",
+    end_date="2024-01-01",
+    horizon=5,
+    window=252,
+    refit=21,
+    dist="normal",
+    alphas=(0.01, 0.05),
+    plot=True,
+    plot_config={
+        "figsize": (10, 5),
+        "alpha_plot": 0.1,
+        "style_var": {"color": "green", "lw": 1.5},
+        "style_rv": {"color": "orange", "lw": 1.0},
+    },
+    seed=2
+)
