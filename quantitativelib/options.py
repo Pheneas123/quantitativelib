@@ -3,6 +3,9 @@ import pandas as pd
 from quantitativelib import base as qt
 from quantitativelib._utils import validate_inputs
 
+__all__ = ["black_scholes"]
+
+
 def black_scholes(option_type, K, S, r, T, sigma, q=0.0, precision=4, show_table=False):
     """
     Calculate Black-Scholes option prices and Greeks using qt.base module.

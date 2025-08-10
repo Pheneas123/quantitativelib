@@ -4,6 +4,19 @@ from quantitativelib._utils import _garch11_variance, _to_series, _negloglik
 from scipy.optimize import minimize
 from scipy.stats import norm, t as student_t
 import pandas as pd
+from arch import arch_model
+
+__all__ = [
+    "bs_call_price", "bs_call_delta", "bs_call_gamma", "bs_call_vega", "bs_call_rho", "bs_call_theta",
+    "bs_put_price", "bs_put_delta", "bs_put_gamma", "bs_put_vega", "bs_put_rho", "bs_put_theta",
+    "bs_forward_price", "bs_forward_delta", "bs_forward_gamma", "bs_forward_vega", "bs_forward_rho", "bs_forward_theta",
+    "bs_binary_call_price", "bs_binary_call_delta", "bs_binary_call_gamma", "bs_binary_call_vega", "bs_binary_call_rho", "bs_binary_call_theta",
+    "bs_binary_put_price", "bs_binary_put_delta", "bs_binary_put_gamma", "bs_binary_put_vega", "bs_binary_put_rho", "bs_binary_put_theta",
+    "euler_maruyama", "milstein",
+    "simulate_gbm", "simulate_cir", "simulate_ou", "simulate_heston", "simulate_merton_jump",
+    "fit_garch", "forecast_garch", "backtest_garch",
+]
+
 
 # === Helper functions ===
 def _d1(S, K, T, r, sigma, q=0.0):
@@ -282,132 +295,94 @@ def simulate_merton_jump(S0, mu, sigma, lambd, m, v, T, N):
 
 # === GARCH Functions === 
 
-def fit_garch(returns, dist="t", seed=None, options=None):
-    """
-    Fit a GARCH(1,1) model by MLE.
-    """
-    r = _to_series(returns).values
-    if r.size == 0:
+def fit_garch(returns, dist="t", options=None):
+    r = _to_series(returns).dropna()
+    if r.empty:
         raise ValueError("returns is empty after NaN removal")
-
-    if seed is not None:
-        np.random.seed(seed)
-
-    v = r.var(ddof=1) if r.size > 1 else 1e-4
-    x0 = np.array([0.05 * v, 0.05, 0.90])
-    bounds = [(1e-12, None), (1e-8, 1 - 1e-6), (1e-8, 1 - 1e-6)]
-    if dist == "t":
-        x0 = np.r_[x0, 8.0]
-        bounds += [(2.01, 200.0)]
-    elif dist != "normal":
-        raise ValueError("dist must be 'normal' or 't'")
-
-    res = minimize(_negloglik, x0, args=(r, dist), method="L-BFGS-B",
-                   bounds=bounds, options=options or {"maxiter": 2000})
-
-    theta = res.x
-    if dist == "t":
-        theta_main, nu = theta[:-1], float(theta[-1])
-    else:
-        theta_main, nu = theta, None
-
-    vhat = _garch11_variance(theta_main, r)
-    shat = np.sqrt(vhat)
-    resid = r / shat
-
-    s = _to_series(returns)
-    variance = pd.Series(vhat, index=s.index, name="variance")
-    residuals = pd.Series(resid, index=s.index, name="std_resid")
-
-    params = {"omega": float(theta_main[0]), "alpha": float(theta_main[1]), "beta": float(theta_main[2])}
-    if nu is not None:
-        params["nu"] = nu
-
+    am = arch_model(r, mean="zero", vol="GARCH", p=1, q=1, dist=dist, rescale=False)
+    res = am.fit(update_freq=0, disp="off", show_warning=False, options=options or {})
+    p = res.params.to_dict()
+    variance = (res.conditional_volatility ** 2).rename("variance")
+    residuals = res.std_resid.rename("std_resid")
+    out_params = {
+        "omega": p.get("omega"),
+        "alpha": p.get("alpha[1]"),
+        "beta":  p.get("beta[1]"),
+    }
+    if dist == "t" and "nu" in p:
+        out_params["nu"] = p.get("nu")
     return {
-        "params": params,
+        "params": out_params,
         "variance": variance,
         "residuals": residuals,
         "dist": dist,
-        "success": bool(res.success),
-        "message": str(res.message),
+        "success": (getattr(res, "convergence_flag", 1) == 0),
+        "message": getattr(res, "message", ""),
+        "model_result": res,
     }
 
 
 def forecast_garch(fit_result, horizon=1):
-    """
-    Multi-step variance forecasts for GARCH(1,1).
-    """
     if horizon < 1:
         raise ValueError("horizon must be >= 1")
-
-    omega = fit_result["params"]["omega"]
-    alpha = fit_result["params"]["alpha"]
-    beta = fit_result["params"]["beta"]
-    last_var = float(fit_result["variance"].iloc[-1])
-
-    vf = np.empty(horizon)
-    vf[0] = omega + (alpha + beta) * last_var
-    for h in range(1, horizon):
-        vf[h] = omega + (alpha + beta) * vf[h - 1]
-
+    res = fit_result["model_result"]
+    fc = res.forecast(horizon=horizon, reindex=False)
+    vf = fc.variance.values[-1]
     idx = pd.RangeIndex(1, horizon + 1, name="horizon")
     return pd.DataFrame({"variance": vf, "vol": np.sqrt(vf)}, index=idx)
 
 
-def backtest_garch(returns, window=1000, horizon=1, refit=20, dist="t", alphas=(0.01, 0.05), seed=None):
-    """
-    Rolling GARCH(1,1) backtest with periodic refits and multi-step forecasts.
-    """
-    r = _to_series(returns)
+def backtest_garch(returns, window=1000, horizon=1, refit=20, dist="t", alphas=(0.01, 0.05)):
+    r = _to_series(returns).dropna()
     n = len(r)
     if n <= window + horizon:
         raise ValueError("Not enough data for the requested window and horizon")
-
-    rv = (r ** 2)
-    rows_params = []
-    rows_fc = []
-
-    # Rolling
+    rv = (r ** 2).clip(lower=1e-12)
+    rows_params, rows_fc = [], []
+    res = None
     for t0 in range(window, n - horizon):
-        # Refit every 'refit' steps; only append params when we actually refit
         if (t0 - window) % refit == 0:
-            fit = fit_garch(r.iloc[t0 - window:t0], dist=dist, seed=seed)
-            cur_params = fit["params"].copy()
-            cur_params["date"] = r.index[t0]
-            rows_params.append(cur_params)
-
-        # Always produce a forecast for this date
-        fc = forecast_garch(fit, horizon=horizon).assign(date=r.index[t0])
-        rows_fc.append(fc.reset_index().set_index(["date", "horizon"]))
-
+            am = arch_model(r.iloc[t0 - window:t0], mean="zero", vol="GARCH", p=1, q=1, dist=dist, rescale=False)
+            res = am.fit(update_freq=0, disp="off", show_warning=False)
+            p = res.params
+            cur = {
+                "omega": float(p.get("omega")),
+                "alpha": float(p.get("alpha[1]")),
+                "beta":  float(p.get("beta[1]")),
+                "date":  r.index[t0],
+            }
+            if dist == "t" and "nu" in p.index:
+                cur["nu"] = float(p["nu"])
+            rows_params.append(cur)
+        f = res.forecast(horizon=horizon, reindex=False)
+        vf = f.variance.values[-1]
+        df_fc = pd.DataFrame(
+            {"horizon": np.arange(1, horizon + 1, dtype=int),
+             "variance": vf,
+             "vol": np.sqrt(vf)}
+        )
+        df_fc["date"] = r.index[t0]
+        rows_fc.append(df_fc.set_index(["date", "horizon"]))
     forecasts = pd.concat(rows_fc).sort_index()
     fitted_params = pd.DataFrame(rows_params).set_index("date").sort_index()
 
-    # Helper to get VaR from variance series
     def _var_from_varseries(var_arr, a, nu_arr=None):
         s = np.sqrt(var_arr)
-        if dist == "normal":
-            z = norm.ppf(a)
-            return s * z
-        else:
-            z = student_t.ppf(a, df=nu_arr)
-            scale = s * np.sqrt((nu_arr - 2.0) / nu_arr)
-            return scale * z
+        if nu_arr is None:
+            return s * norm.ppf(a)
+        z = student_t.ppf(a, df=nu_arr)
+        scale = s * np.sqrt((nu_arr - 2.0) / nu_arr)
+        return scale * z
 
     var_hits = {}
     for a in alphas:
-        if dist == "t":
-
+        if dist == "t" and ("nu" in fitted_params.columns) and not fitted_params["nu"].isna().all():
             dates = forecasts.index.get_level_values(0)
-            nu_per_date = fitted_params["nu"].groupby(level=0).last()
-            nu_unique = nu_per_date.reindex(dates.unique()).ffill()
-            nu_seq = nu_unique.reindex(dates).to_numpy()
-
-            vhat = forecasts["variance"].values
+            nu_seq = fitted_params["nu"].reindex(dates).ffill().to_numpy()
+            vhat = forecasts["variance"].to_numpy()
             var_a = _var_from_varseries(vhat, a, nu_arr=nu_seq)
         else:
-            var_a = _var_from_varseries(forecasts["variance"].values, a)
-
+            var_a = _var_from_varseries(forecasts["variance"].to_numpy(), a)
         idx_list, hit_list = [], []
         for (t, h), vhat_h in zip(forecasts.index, var_a):
             i = r.index.get_indexer_for([t])[0]
@@ -418,8 +393,6 @@ def backtest_garch(returns, window=1000, horizon=1, refit=20, dist="t", alphas=(
             idx_list.append((t, h))
         var_hits[a] = pd.Series(hit_list, index=pd.MultiIndex.from_tuples(idx_list, names=["date", "horizon"]))
     var_hits = pd.DataFrame(var_hits).sort_index()
-
-    # Simple metrics for h=1
     f1 = forecasts.xs(1, level="horizon")["variance"]
     rv_align, f_align = [], []
     for t in f1.index:
@@ -429,14 +402,13 @@ def backtest_garch(returns, window=1000, horizon=1, refit=20, dist="t", alphas=(
             f_align.append(f1.loc[t])
 
     def _qlike(rv_, fv_):
-        rv_ = np.asarray(rv_)
-        fv_ = np.asarray(fv_)
+        rv_ = np.maximum(np.asarray(rv_, float), 1e-12)
+        fv_ = np.maximum(np.asarray(fv_, float), 1e-12)
         return float(np.mean(rv_ / fv_ + np.log(fv_) - np.log(rv_) - 1.0))
 
     metrics = {}
     if f_align:
         metrics["QLIKE_h1"] = _qlike(rv_align, f_align)
-
     return {
         "fitted_params": fitted_params,
         "forecasts": forecasts,

@@ -2,6 +2,8 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 
+__all__ = ["analyse"]
+
 def analyse(
     ticker, 
     start_date, 

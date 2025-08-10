@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
 from quantitativelib.base import simulate_gbm, simulate_cir, simulate_heston, simulate_ou, simulate_merton_jump
+
+__all__ = ["simulate_sde"]
 
 def simulate_sde(model, params, T=1.0, N=1000, method='euler', plot=True, return_stats=False, plot_config=None, seed=None):
     """
