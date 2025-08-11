@@ -101,3 +101,60 @@ def analyse(
         return list(results.values())[0]
     else:
         return pd.concat(results.values())
+
+
+def risk_metrics(returns=None,
+    ticker=None,
+    start_date=None,
+    end_date=None,
+    risk_free_rate=0.01,
+    alpha=0.05,
+    force_positive=False):
+    """
+    Calculate risk metrics for a given stock ticker.
+    Parameters:
+    - ticker (str): Stock ticker symbol.
+    - start_date (str): Start date in 'YYYY-MM-DD' format.
+    - end_date (str): End date in 'YYYY-MM-DD' format.
+    - risk_free_rate (float): Annual risk-free rate (default 0.01).
+    - alpha (float): Significance level for Value at Risk (default 0.05).
+    - force_positive (bool): If True, display VaR and Expected Shortfall as positive.
+    Returns:
+    - dict: Contains Value at Risk (VaR) and Conditional Value at Risk (CVaR, Expected Shortfall).
+    """
+    if returns is None:
+        if ticker is None or start_date is None or end_date is None:
+            raise ValueError("Provide either returns OR ticker + start_date + end_date")
+        data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
+        if data.empty or "Close" not in data.columns:
+            raise ValueError(f"No price data found for {ticker}")
+        returns = data['Close'].pct_change().dropna()
+    if returns.empty:
+        raise ValueError("No returns data available for the specified period.")
+    
+    
+
+    mean_return = returns.mean()
+    std_dev = returns.std()
+  
+    if force_positive == True:
+        VaR = abs(returns.quantile(alpha))
+        ES = abs(returns[returns <= -VaR].mean())
+        VaR_annualised = VaR * (252 ** 0.5)
+        ES_annualised = ES * (252 ** 0.5)
+    else: # will display VaR and ES as calculated directly from the formula - no adjustment
+        VaR = returns.quantile(alpha)
+        ES = returns[returns <= -VaR].mean()
+        VaR_annualised = VaR * (252 ** 0.5)
+        ES_annualised = ES * (252 ** 0.5)
+
+
+    return {
+        'VaR': VaR,
+        'ES': ES,
+        'VaR_annualised': VaR_annualised,
+        'ES_annualised': ES_annualised,
+        'mean_return': mean_return,
+        'std_dev': std_dev
+    }
+    
