@@ -9,3 +9,13 @@ build/
 # Python cache
 __pycache__/
 *.pyc
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
