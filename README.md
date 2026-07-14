@@ -26,5 +26,6 @@ Supports simulation of SDEs using Euler–Maruyama and Milstein schemes. Include
 ## Documentation
 
 For complete examples, usage guidance, API details, and model conventions, see
-the [user guide](docs/user-guide.md), [API reference](docs/api-reference.md), and
-[model notes](docs/model-notes.md).
+the [user guide](https://github.com/Pheneas123/quantitativelib/blob/main/docs/user-guide.md),
+[API reference](https://github.com/Pheneas123/quantitativelib/blob/main/docs/api-reference.md),
+and [model notes](https://github.com/Pheneas123/quantitativelib/blob/main/docs/model-notes.md).
