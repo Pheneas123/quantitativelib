@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 
-__all__ = ["analyse"]
+__all__ = ["analyse", "risk_metrics"]
 
 def analyse(
     ticker, 
@@ -129,6 +129,7 @@ def risk_metrics(returns=None,
         if data.empty or "Close" not in data.columns:
             raise ValueError(f"No price data found for {ticker}")
         returns = data['Close'].pct_change().dropna()
+    returns = pd.Series(returns).dropna()
     if returns.empty:
         raise ValueError("No returns data available for the specified period.")
     
@@ -137,16 +138,18 @@ def risk_metrics(returns=None,
     mean_return = returns.mean()
     std_dev = returns.std()
   
-    if force_positive == True:
-        VaR = abs(returns.quantile(alpha))
-        ES = abs(returns[returns <= -VaR].mean())
-        VaR_annualised = VaR * (252 ** 0.5)
-        ES_annualised = ES * (252 ** 0.5)
-    else: # will display VaR and ES as calculated directly from the formula - no adjustment
-        VaR = returns.quantile(alpha)
-        ES = returns[returns <= -VaR].mean()
-        VaR_annualised = VaR * (252 ** 0.5)
-        ES_annualised = ES * (252 ** 0.5)
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must be between 0 and 1")
+
+    quantile = returns.quantile(alpha)
+    tail = returns[returns <= quantile]
+    VaR = quantile
+    ES = tail.mean()
+    if force_positive:
+        VaR = abs(VaR)
+        ES = abs(ES)
+    VaR_annualised = VaR * (252 ** 0.5)
+    ES_annualised = ES * (252 ** 0.5)
 
 
     return {

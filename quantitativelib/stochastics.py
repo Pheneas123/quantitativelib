@@ -35,10 +35,10 @@ def simulate_sde(model, params, T=1.0, N=1000, method='euler', plot=True, return
         t, X = simulate_gbm(**params, T=T, N=N, method=method)
 
     elif model == 'cir':
-        t, X = simulate_cir(**params, T=T, N=N)
+        t, X = simulate_cir(**params, T=T, N=N, method=method)
 
     elif model == 'ou':
-        t, X = simulate_ou(**params, T=T, N=N)
+        t, X = simulate_ou(**params, T=T, N=N, method=method)
 
     elif model == 'merton':
         t, X = simulate_merton_jump(**params, T=T, N=N)
@@ -94,7 +94,15 @@ def simulate_sde(model, params, T=1.0, N=1000, method='euler', plot=True, return
                     plt.savefig(savefig, dpi=300)
                 plt.show()
 
-            return (t, S, V)
+        if return_stats:
+            stats = {
+                'final_price': S[-1],
+                'final_variance': V[-1],
+                'mean_price': np.mean(S),
+                'mean_variance': np.mean(V),
+            }
+            return t, S, V, stats
+        return t, S, V
 
     else:
         raise ValueError(f"Unsupported model: {model}")

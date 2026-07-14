@@ -22,3 +22,9 @@ Implements Black–Scholes pricing for calls, puts, forwards, and binary options
 
 Stochastic Calculus Simulations
 Supports simulation of SDEs using Euler–Maruyama and Milstein schemes. Includes built-in models such as GBM, CIR, OU, Heston, and Merton jump diffusion, with a unified interface for simulation, plotting, and statistical output.
+
+## Documentation
+
+For complete examples, usage guidance, API details, and model conventions, see
+the [user guide](docs/user-guide.md), [API reference](docs/api-reference.md), and
+[model notes](docs/model-notes.md).

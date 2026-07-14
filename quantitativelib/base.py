@@ -142,7 +142,12 @@ def bs_binary_call_delta(S, K, T, r, sigma, q=0.0):
 def bs_binary_call_gamma(S, K, T, r, sigma, q=0.0):
     """Calculate binary call option gamma."""
     d2 = _d2(S, K, T, r, sigma, q)
-    return -(np.exp(-r * T) * _phi_d2(S, K, T, r, sigma, q) * d2) / (S**2 * sigma**2 * T)
+    return -(
+        np.exp(-r * T)
+        * _phi_d2(S, K, T, r, sigma, q)
+        * (d2 + sigma * np.sqrt(T))
+        / (S**2 * sigma**2 * T)
+    )
 
 def bs_binary_call_vega(S, K, T, r, sigma, q=0.0):
     """Calculate binary call option vega."""
@@ -174,7 +179,12 @@ def bs_binary_put_delta(S, K, T, r, sigma, q=0.0):
 def bs_binary_put_gamma(S, K, T, r, sigma, q=0.0):
     """Calculate binary put option gamma."""
     d2 = _d2(S, K, T, r, sigma, q)
-    return (np.exp(-r * T) * _phi_d2(S, K, T, r, sigma, q) * d2) / (S**2 * sigma**2 * T)
+    return (
+        np.exp(-r * T)
+        * _phi_d2(S, K, T, r, sigma, q)
+        * (d2 + sigma * np.sqrt(T))
+        / (S**2 * sigma**2 * T)
+    )
 
 def bs_binary_put_vega(S, K, T, r, sigma, q=0.0):
     """Calculate binary put option vega."""
@@ -335,33 +345,54 @@ def forecast_garch(fit_result, horizon=1):
 def backtest_garch(returns, window=1000, horizon=1, refit=20, dist="t", alphas=(0.01, 0.05)):
     r = _to_series(returns).dropna()
     n = len(r)
-    if n <= window + horizon:
+    if n < window + horizon:
         raise ValueError("Not enough data for the requested window and horizon")
     rv = (r ** 2).clip(lower=1e-12)
+    if refit < 1:
+        raise ValueError("refit must be >= 1")
+
     rows_params, rows_fc = [], []
-    res = None
-    for t0 in range(window, n - horizon):
-        if (t0 - window) % refit == 0:
-            am = arch_model(r.iloc[t0 - window:t0], mean="zero", vol="GARCH", p=1, q=1, dist=dist, rescale=False)
+    params = None
+    current_variance = None
+    first_origin = window - 1
+    for origin in range(first_origin, n - horizon):
+        if (origin - first_origin) % refit == 0:
+            sample = r.iloc[origin - window + 1:origin + 1]
+            am = arch_model(sample, mean="zero", vol="GARCH", p=1, q=1, dist=dist, rescale=False)
             res = am.fit(update_freq=0, disp="off", show_warning=False)
             p = res.params
-            cur = {
+            params = {
                 "omega": float(p.get("omega")),
                 "alpha": float(p.get("alpha[1]")),
-                "beta":  float(p.get("beta[1]")),
-                "date":  r.index[t0],
+                "beta": float(p.get("beta[1]")),
+            }
+            current_variance = float((res.conditional_volatility.iloc[-1]) ** 2)
+            cur = {
+                **params,
+                "date": r.index[origin],
             }
             if dist == "t" and "nu" in p.index:
                 cur["nu"] = float(p["nu"])
             rows_params.append(cur)
-        f = res.forecast(horizon=horizon, reindex=False)
-        vf = f.variance.values[-1]
+        elif current_variance is not None:
+            # The previous origin's one-step forecast is the current
+            # conditional variance once that return has been observed.
+            current_variance = one_step_variance
+
+        omega = params["omega"]
+        alpha = params["alpha"]
+        beta = params["beta"]
+        one_step_variance = omega + alpha * float(r.iloc[origin]) ** 2 + beta * current_variance
+        vf = np.empty(horizon, dtype=float)
+        vf[0] = one_step_variance
+        for h in range(1, horizon):
+            vf[h] = omega + (alpha + beta) * vf[h - 1]
         df_fc = pd.DataFrame(
             {"horizon": np.arange(1, horizon + 1, dtype=int),
              "variance": vf,
              "vol": np.sqrt(vf)}
         )
-        df_fc["date"] = r.index[t0]
+        df_fc["date"] = r.index[origin]
         rows_fc.append(df_fc.set_index(["date", "horizon"]))
     forecasts = pd.concat(rows_fc).sort_index()
     fitted_params = pd.DataFrame(rows_params).set_index("date").sort_index()
